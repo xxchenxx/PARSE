@@ -141,7 +141,7 @@ def compute_rank_df(pdb_data, db):
         embeddings = embeddings[high_conf_idx]
 
     cosines = fastdist.cosine_matrix_to_matrix(embeddings, db['embeddings'])  # (n_res, n_db)
-    
+    print(cosines)
     max_site_idx = np.argmax(cosines, axis=0)
     max_values = np.amax(cosines, 0)
 
