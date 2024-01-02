@@ -147,7 +147,6 @@ def compute_rank_df(pdb_data, db):
 
     out_df = pd.DataFrame({'site': pdb_resids, 'score': max_values, 'location': resids[max_site_idx]})
     out_df = out_df.sort_values('score', ascending=False)
-    print(out_df)
     out_df = out_df.drop_duplicates('site').reset_index(drop=True)
     
     return out_df
