@@ -40,6 +40,7 @@ if __name__=="__main__":
     else:
         raise Exception('Must provide either PDB file (--pdb) or ID and LMDB dataset for precomputed embeddings (--precomputed_id, --precomputed_lmdb)')
     print(embed_data)
+    print(db)
     rnk = parse.compute_rank_df(embed_data, db)
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
     print(results)
