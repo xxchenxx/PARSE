@@ -11,6 +11,7 @@ from collapse.data import SiteDataset, SiteNNDataset
 from torch_geometric.loader import DataLoader
 from collapse import initialize_model, atom_info
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('dataset', type=str)
 parser.add_argument('embedding_outfile', type=str)
@@ -43,9 +44,14 @@ all_pdb = []
 all_sites = []
 all_sources = []
 all_resids = []
+
+
 with torch.no_grad():
     for g, pdb, source, desc in loader:
         g = g.to(device)
+
+
+
         embeddings, _ = model.online_encoder(g, return_projection=False)
         all_emb.append(embeddings.squeeze().cpu().numpy())
         all_pdb.append(pdb[0])
