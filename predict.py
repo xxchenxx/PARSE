@@ -46,8 +46,8 @@ if __name__=="__main__":
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
     full_result.to_csv(f'{pdb_id}_full_result.csv')
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
-    full_result.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')
+    results.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')
 
-    # print(results)
-    # print(f'Finished in {time.time() - start:.2f} seconds')
+    print(results)
+    print(f'Finished in {time.time() - start:.2f} seconds')
     

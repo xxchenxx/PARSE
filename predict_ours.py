@@ -29,27 +29,69 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
     graphs = []
     if not include_hets:
         atom_df = atom_df[atom_df.resname.isin(atom_info.aa)].reset_index(drop=True)
-    
+    # print(atom_df)
     current_chain = None
+    current_resid = None
     baseUrl = "http://www.uniprot.org/uniprot/"
     for j in tqdm(range(atom_df.shape[0])):
-        g = g.to(device)
+        # g = g.to(device)
         chain = atom_df.iloc[j]['chain']
         # print(pdb_id, chain)
-        filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
-    
-        for i in range(filtered.shape[0]):
-            row = filtered.iloc[i]
-            resid = int(atom_df.iloc[j]['residue'])
-            # print(g.resid[0], row['RES_BEG'], row['RES_END'])
-            # print(resid, row['RES_BEG'], row['RES_END'])
-            if resid >= row['RES_BEG'] and resid <= row['RES_END']:
-                index = resid - row['RES_BEG'] + row['SP_BEG'] - 1
+        resid = int(atom_df.iloc[j]['residue'])
+        if current_resid == resid and current_chain == chain:
+            continue
+        else:
+            # print(pdb_id, chain, resid)
+            if not 'AF' in pdb_id:
+                filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
+                # print(filtered)
+                for i in range(filtered.shape[0]):
+                    row = filtered.iloc[i]
+                    
+                    # print(g.resid[0], row['RES_BEG'], row['RES_END'])
+                    # print(resid, row['RES_BEG'], row['RES_END'])
+                
+                    if resid >= row['RES_BEG'] and resid <= row['RES_END']:
+                        index = resid - row['RES_BEG'] + row['SP_BEG'] - 1
+                        # print(index) - 1
+                        if current_chain == chain:
+                            embeddings = sequence_embedding[index]
+                        else:
+                            currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                            response = r.post(currentUrl)
+                            cData=''.join(response.text)
+
+                            Seq=StringIO(cData)
+                            pSeq=SeqIO.parse(Seq, 'fasta')
+                            pSeq = list(pSeq)
+                            pSeq = str(pSeq[0].seq)
+                            d = [
+                                ("protein1", pSeq),
+                            ]
+                            batch_labels, batch_strs, batch_tokens = batch_converter(d)
+                            batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
+                            with torch.no_grad():
+                                batch_tokens = batch_tokens.cuda()
+                                results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
+                            token_representations = results["representations"][12][:,1:-1]
+                            sequence_embedding = model.encoder_q(token_representations)[0]
+                            embeddings = sequence_embedding[index]
+                            current_chain = chain
+                        emb_data['chains'].append(chain)
+                        emb_data['resids'].append(str(resid))
+                        emb_data['confidence'].append(1)
+                        emb_data['embeddings'].append(embeddings.detach().cpu().numpy())
+                        # print(len(emb_data['embeddings']))
+                        # print(resid)
+                        current_resid = resid
+                        current_chain = chain
+            else:
+                index = resid - 1
                 # print(index) - 1
                 if current_chain == chain:
                     embeddings = sequence_embedding[index]
                 else:
-                    currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                    currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
                     response = r.post(currentUrl)
                     cData=''.join(response.text)
 
@@ -70,9 +112,11 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
                     embeddings = sequence_embedding[index]
                     current_chain = chain
                 emb_data['chains'].append(chain)
-                emb_data['resids'].append(resid)
+                emb_data['resids'].append(str(resid))
                 emb_data['confidence'].append(1)
-                emb_data['embeddings']. append(embeddings.cpu().numpy())
+                emb_data['embeddings'].append(embeddings.detach().cpu().numpy())
+            current_resid = resid
+            current_chain = chain
         # emb_data['embeddings'] = np.stack(embs.cpu().numpy(), 0)
     return emb_data
 
@@ -97,9 +141,9 @@ if __name__=="__main__":
     background_dists = utils.deserialize(args.background)
     
     if args.pdb:
-        model = initialize_model(device=device)
+        # model = initialize_model(device=device)
         pdb_df = process_pdb(args.pdb, chain=args.chain, include_hets=False)
-        embed_data = embed_protein_custom(pdb_df, None, args.pdb.split(".")[0], device, include_hets=False)
+        embed_data = embed_protein_custom(pdb_df, None, args.pdb.split(".")[0].split("/")[-1], device, include_hets=False)
         embed_data['id'] = args.pdb
         print(f'Time to embed PDB: {time.time() - start:.2f} seconds')
     else:
@@ -109,8 +153,8 @@ if __name__=="__main__":
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
     full_result.to_csv(f'{pdb_id}_full_result.csv')
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
-    full_result.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')
+    results.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')
 
-    # print(results)
-    # print(f'Finished in {time.time() - start:.2f} seconds')
+    print(results)
+    print(f'Finished in {time.time() - start:.2f} seconds')
     

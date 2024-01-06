@@ -77,7 +77,7 @@ with torch.no_grad():
         chain = pdb[0][4:]
         # print(pdb_id, chain)
         filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
-    
+        
         for i in range(filtered.shape[0]):
             row = filtered.iloc[i]
             resid = int(g.resid[0][1:])
