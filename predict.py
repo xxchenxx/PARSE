@@ -5,6 +5,8 @@ import time
 import parse
 import utils
 
+
+
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--pdb', type=str, default=None, help='Input PDB file')

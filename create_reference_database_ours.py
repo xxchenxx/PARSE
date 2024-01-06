@@ -34,7 +34,7 @@ else:
     dataset = SiteDataset(src_dataset, args.pdb_dir, train_mode=False)
 loader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=0)
 
-model = initialize_model(device=device)
+# model = initialize_model(device=device)
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 print('Computing embeddings...')
@@ -45,7 +45,7 @@ all_sites = []
 all_sources = []
 all_resids = []
 
-mapping = pd.read_csv("pdb_chain_uniprot.csv")
+mapping = pd.read_csv("pdb_chain_uniprot.csv", header=0)
 current_pdb = None
 current_chain = None
 embeddings = None
@@ -68,21 +68,26 @@ from io import StringIO
 
 baseUrl="http://www.uniprot.org/uniprot/"
 
-
+from tqdm import tqdm
 with torch.no_grad():
-    for g, pdb, source, desc in loader:
+    for g, pdb, source, desc in tqdm(loader):
         g = g.to(device)
 
         pdb_id = pdb[0][:4]
-        chain = pdb_id[0][4:]
+        chain = pdb[0][4:]
+        # print(pdb_id, chain)
         filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
     
-        for row in filtered:
-            if g.resid[0] >= row['RES_BEG'] and g.resid[0] <= row['RES_BEG']:
-                index = g.resid[0] - row['RES_BEG'] + row['SP_BEG']
-
+        for i in range(filtered.shape[0]):
+            row = filtered.iloc[i]
+            resid = int(g.resid[0][1:])
+            # print(g.resid[0], row['RES_BEG'], row['RES_END'])
+            # print(resid, row['RES_BEG'], row['RES_END'])
+            if resid >= row['RES_BEG'] and resid <= row['RES_END']:
+                index = resid - row['RES_BEG'] + row['SP_BEG'] - 1
+                # print(index) - 1
                 if pdb_id == current_pdb and current_chain == chain:
-                    embeddinggs = sequence_embedding[index]
+                    embeddings = sequence_embedding[index]
                 else:
                     currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
                     response = r.post(currentUrl)
@@ -90,7 +95,8 @@ with torch.no_grad():
 
                     Seq=StringIO(cData)
                     pSeq=SeqIO.parse(Seq, 'fasta')
-
+                    pSeq = list(pSeq)
+                    pSeq = str(pSeq[0].seq)
                     d = [
                         ("protein1", pSeq),
                     ]
@@ -101,7 +107,7 @@ with torch.no_grad():
                         results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
                     token_representations = results["representations"][12][:,1:-1]
                     sequence_embedding = model.encoder_q(token_representations)[0]
-                    embeddinggs = sequence_embedding[index]
+                    embeddings = sequence_embedding[index]
                     current_pdb = pdb_id
                     current_chain = chain
 
