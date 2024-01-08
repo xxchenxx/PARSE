@@ -57,8 +57,11 @@ def enrichment(signature, library, min_size=5, max_size=4000, processes=4, cente
             gsets.append(k)
             gsize = len(stripped_set)
             rs, es = gsea.enrichment_score(abs_signature, signature_map, stripped_set)
+            # if es == 0:
+            #     legenes = ''
+            # else:
+            #     legenes = gsea.get_leading_edge(rs, signature, stripped_set, signature_map)
             legenes = gsea.get_leading_edge(rs, signature, stripped_set, signature_map)
-
             ess.append(float(es))
             set_size.append(gsize)
             legeness.append(legenes)
@@ -146,6 +149,29 @@ def compute_rank_df(pdb_data, db):
     max_values = np.amax(cosines, 0)
 
     out_df = pd.DataFrame({'site': pdb_resids, 'score': max_values, 'location': resids[max_site_idx]})
+    out_df = out_df.sort_values('score', ascending=False)
+    out_df = out_df.drop_duplicates('site').reset_index(drop=True)
+    
+    return out_df
+
+def compute_rank_df_for_background(embeddings, db):
+    """Compute ranked list of DB sites based on distance to query residues
+
+    :param embeddings: embeddings of a protein
+    :type embeddings: np.array
+    :param db: database embedding dictionary, must have keys `pdb`, `resids`, `embeddings`
+    :type db: dict
+    
+    :return: ranked list of DB sites in dataframe format, sorted by cosine similarity
+    :rtype: pd.DataFrame
+    """
+    pdb_resids = [x+'_'+y for x,y in zip(db['pdbs'], db['resids'])]
+    
+    cosines = fastdist.cosine_matrix_to_matrix(embeddings, db['embeddings'])  # (n_res, n_db)
+    max_site_idx = np.argmax(cosines, axis=0)
+    max_values = np.amax(cosines, 0)
+
+    out_df = pd.DataFrame({'site': pdb_resids, 'score': max_values})
     out_df = out_df.sort_values('score', ascending=False)
     out_df = out_df.drop_duplicates('site').reset_index(drop=True)
     
