@@ -37,6 +37,9 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
         # g = g.to(device)
         chain = atom_df.iloc[j]['chain']
         # print(pdb_id, chain)
+        # print(atom_df.iloc[j]) 
+        # assert False
+        resname = atom_df.iloc[j]['resname']
         resid = int(atom_df.iloc[j]['residue'])
         if current_resid == resid and current_chain == chain:
             continue
@@ -78,7 +81,8 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
                             embeddings = sequence_embedding[index]
                             current_chain = chain
                         emb_data['chains'].append(chain)
-                        emb_data['resids'].append(str(resid))
+                        
+                        emb_data['resids'].append(atom_info.aa_to_letter(resname) + str(resid))
                         emb_data['confidence'].append(1)
                         emb_data['embeddings'].append(embeddings.detach().cpu().numpy())
                         # print(len(emb_data['embeddings']))
@@ -111,8 +115,9 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
                     sequence_embedding = model.encoder_q(token_representations)[0]
                     embeddings = sequence_embedding[index]
                     current_chain = chain
+                
                 emb_data['chains'].append(chain)
-                emb_data['resids'].append(str(resid))
+                emb_data['resids'].append(atom_info.aa_to_letter(resname) + str(resid))
                 emb_data['confidence'].append(1)
                 emb_data['embeddings'].append(embeddings.detach().cpu().numpy())
             current_resid = resid
@@ -151,9 +156,9 @@ if __name__=="__main__":
     rnk = parse.compute_rank_df(embed_data, db)
     full_result = parse.parse(rnk, function_sets, background_dists, cutoff=1)
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
-    full_result.to_csv(f'{pdb_id}_full_result.csv')
+    full_result.to_csv(f'ours_{pdb_id}_full_result.csv')
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
-    results.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')
+    results.to_csv(f'ours_{pdb_id}_cutoff_{args.cutoff}.csv')
 
     print(results)
     print(f'Finished in {time.time() - start:.2f} seconds')

@@ -105,11 +105,12 @@ def parse(rank_df, function_sets, background_dists, cutoff=0.001):
     in_df = rank_df[['site', 'score']]
     in_df.columns = [0, 1]
     result = enrichment(in_df, function_sets)
+    result.to_csv("intermediate.csv")
     result['empirical_pval'] = result.apply(lambda x: get_pval(x, function_score_dists=background_dists), axis=1)
     result['empirical_FDR'] = false_discovery_control(result['empirical_pval'], method='bh')
     result['ref_sites'] = [x.split(',') for x in np.nan_to_num(result['ref_sites'].tolist(), '')]
     site_map, res_match = utils.get_db_site_map(rank_df)
-    result['hit_sites'] = [[site_map.get(x, 'N/A') for x in l] for l in result['ref_sites']]
+    result['hit_sites'] = [set([site_map.get(x, 'N/A') for x in l]) for l in result['ref_sites']]
     # result['res_match'] = [[res_match.get(x, 'N/A') for x in l] for l in result['ref_sites']]
     return result[result['empirical_FDR'] < cutoff]
     
@@ -127,7 +128,7 @@ def compute_rank_df(pdb_data, db):
     pdb_resids = [x+'_'+y for x,y in zip(db['pdbs'], db['resids'])]
     
     pdb_id, af_flag = utils.pdb_from_fname(pdb_data["id"])
-
+    print(pdb_data)
     resids = np.array(pdb_data['resids'])
     chains = np.array(pdb_data['chains'])
     embeddings = np.array(pdb_data['embeddings'])
