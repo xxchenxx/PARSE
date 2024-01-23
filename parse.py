@@ -107,7 +107,7 @@ def parse(rank_df, function_sets, background_dists, cutoff=0.001):
     """
     in_df = rank_df[['site', 'score']]
     in_df.columns = [0, 1]
-    result = enrichment(in_df, function_sets)
+    result = enrichment(in_df, function_sets, min_size=2)
     result.to_csv("intermediate.csv")
     result['empirical_pval'] = result.apply(lambda x: get_pval(x, function_score_dists=background_dists), axis=1)
     result['empirical_FDR'] = false_discovery_control(result['empirical_pval'], method='bh')
@@ -115,6 +115,8 @@ def parse(rank_df, function_sets, background_dists, cutoff=0.001):
     site_map, res_match = utils.get_db_site_map(rank_df)
     result['hit_sites'] = [set([site_map.get(x, 'N/A') for x in l]) for l in result['ref_sites']]
     # result['res_match'] = [[res_match.get(x, 'N/A') for x in l] for l in result['ref_sites']]
+    result = result[result['hit_sites'].apply(lambda x: len(x) >= 2)]
+    result.to_csv("intermediate_filtered.csv")
     return result[result['empirical_FDR'] < cutoff]
     
 def compute_rank_df(pdb_data, db):

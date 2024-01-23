@@ -19,12 +19,10 @@ esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
 esm_model = esm_model.to('cuda')
 batch_converter = alphabet.get_batch_converter()
 esm_model.eval()
-from CLEAN.model import MoCo
-model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
-model.load_state_dict(torch.load("best_demo_1702870147.059707_checkpoints.pth.tar")['model_state_dict'])
+
 from tqdm import tqdm
 
-def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=True, env_radius=10.0):
+def embed_protein_custom(model, atom_df, model_fn, pdb_id, device='cpu', include_hets=True, env_radius=10.0, uniprot=None):
     emb_data = col.defaultdict(list)
     graphs = []
     if not include_hets:
@@ -91,11 +89,11 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
                         current_chain = chain
             else:
                 index = resid - 1
-                # print(index) - 1
                 if current_chain == chain:
                     embeddings = sequence_embedding[index]
                 else:
-                    currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
+                    currentUrl=baseUrl + uniprot + ".fasta"
+                    # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
                     response = r.post(currentUrl)
                     cData=''.join(response.text)
 
@@ -114,14 +112,14 @@ def embed_protein_custom(atom_df, model_fn, pdb_id, device='cpu', include_hets=T
                     token_representations = results["representations"][12][:,1:-1]
                     sequence_embedding = model.encoder_q(token_representations)[0]
                     embeddings = sequence_embedding[index]
-                    current_chain = chain
+                    
                 
                 emb_data['chains'].append(chain)
                 emb_data['resids'].append(atom_info.aa_to_letter(resname) + str(resid))
                 emb_data['confidence'].append(1)
                 emb_data['embeddings'].append(embeddings.detach().cpu().numpy())
-            current_resid = resid
-            current_chain = chain
+                current_resid = resid
+                current_chain = chain
         # emb_data['embeddings'] = np.stack(embs.cpu().numpy(), 0)
     return emb_data
 
@@ -136,6 +134,8 @@ if __name__=="__main__":
     parser.add_argument('--background', type=str, default='./data/function_score_dists.pkl', help='Function-specific background distributions')
     parser.add_argument('--cutoff', type=float, default=0.001, help='FDR cutoff for reporting results')
     parser.add_argument('--use_gpu', action='store_true', help='Use GPU to embed proteins')
+    parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
+    parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only"])
     args = parser.parse_args()
     
     start = time.time()
@@ -145,17 +145,33 @@ if __name__=="__main__":
     function_sets = utils.deserialize(args.function_sets)
     background_dists = utils.deserialize(args.background)
     
+    from CLEAN.model import MoCo, MoCo_positive_only
+    from CLEAN.simsiam import SimSiam
+
+    if args.model == 'MoCo':
+        model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    elif args.model == 'SimSiam':
+        model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    elif args.model == 'MoCo_positive_only':
+        model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+
     if args.pdb:
         # model = initialize_model(device=device)
         pdb_df = process_pdb(args.pdb, chain=args.chain, include_hets=False)
-        embed_data = embed_protein_custom(pdb_df, None, args.pdb.split(".")[0].split("/")[-1], device, include_hets=False)
+        if not 'AF' in args.pdb:
+            embed_data = embed_protein_custom(model, pdb_df, None, args.pdb.split("/")[-1].split(".")[0], device, include_hets=False)
+        else:
+            embed_data = embed_protein_custom(model, pdb_df, None, args.pdb.split("/")[-1].split(".")[0], device, include_hets=False, uniprot=args.pdb.split("-")[1])
         embed_data['id'] = args.pdb
         print(f'Time to embed PDB: {time.time() - start:.2f} seconds')
     else:
         assert False
+
     rnk = parse.compute_rank_df(embed_data, db)
     full_result = parse.parse(rnk, function_sets, background_dists, cutoff=1)
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
+    rnk.to_csv(f"ours_rnk_{pdb_id}.csv")
     full_result.to_csv(f'ours_{pdb_id}_full_result.csv')
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
     results.to_csv(f'ours_{pdb_id}_cutoff_{args.cutoff}.csv')

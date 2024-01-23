@@ -44,6 +44,7 @@ if __name__=="__main__":
     rnk = parse.compute_rank_df(embed_data, db)
     full_result = parse.parse(rnk, function_sets, background_dists, cutoff=1)
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
+    rnk.to_csv(f"parse_rnk_{pdb_id}.csv")
     full_result.to_csv(f'{pdb_id}_full_result.csv')
     results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
     results.to_csv(f'{pdb_id}_cutoff_{args.cutoff}.csv')

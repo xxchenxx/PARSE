@@ -158,9 +158,9 @@ class MoCoEncoder(nn.Module):
         return x
 
 class MoCo(nn.Module):
-    def __init__(self, hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=1280):
+    def __init__(self, hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=1280, queue_size=1024):
         super(MoCo, self).__init__()
-        self.K = 1024
+        self.K = queue_size
         self.m = 0.999
         self.T = 0.07
 
@@ -487,3 +487,133 @@ class MoCo_with_SMILE(nn.Module):
             return logits, labels, aux_loss, metrics, q
         else:
             return logits, labels, aux_loss, metrics, self.ec_number_labels, q
+
+
+class MoCo_positive_only(nn.Module):
+    def __init__(self, hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=1280):
+        super(MoCo_positive_only, self).__init__()
+        self.K = 1000
+        self.m = 0.999
+        self.T = 0.07
+
+        self.encoder_q = MoCoEncoder(hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=esm_model_dim)
+        self.encoder_k = MoCoEncoder(hidden_dim, out_dim, device, dtype, drop_out=0.1,esm_model_dim=esm_model_dim)
+
+        for param_q, param_k in zip(
+            self.encoder_q.parameters(), self.encoder_k.parameters()
+        ):
+            param_k.data.copy_(param_q.data)  # initialize
+            param_k.requires_grad = False  # not update by gradient
+
+        # create the queue
+        self.register_buffer("queue", torch.randn(out_dim, self.K))
+
+        self.ec_number_labels = [None] * self.K
+        # self.queue.cuda()
+        self.queue = nn.functional.normalize(self.queue, dim=0)
+
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+            """Initialize the weights"""
+            if isinstance(module, nn.Linear):
+                # Slightly different from the TF version which uses truncated_normal for initialization
+                # cf https://github.com/pytorch/pytorch/pull/5617
+                module.weight.data.normal_(mean=0.0, std=0.02)
+                if module.bias is not None:
+                    module.bias.data.zero_()
+            elif isinstance(module, nn.Embedding):
+                module.weight.data.normal_(mean=0.0, std=0.02)
+                if module.padding_idx is not None:
+                    module.weight.data[module.padding_idx].zero_()
+            elif isinstance(module, nn.LayerNorm):
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
+
+
+    @torch.no_grad()
+    def _momentum_update_key_encoder(self):
+        """
+        Momentum update of the key encoder
+        """
+        for param_q, param_k in zip(
+            self.encoder_q.parameters(), self.encoder_k.parameters()
+        ):
+            param_k.data = param_k.data * self.m + param_q.data * (1.0 - self.m)
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys, ec_numbers=None):
+        # gather keys before updating queue
+        # keys = concat_all_gather(keys)
+
+        batch_size = keys.shape[0]
+
+        if self.K % batch_size != 0:
+            self.queue_ptr[0] = 0
+            return
+        ptr = int(self.queue_ptr)
+        assert self.K % batch_size == 0  # for simplicity
+
+        # replace the keys at ptr (dequeue and enqueue)
+        if ptr + batch_size > self.queue.shape[1]:
+            self.queue[:, ptr : ptr + batch_size] = (keys.T)[:, :(self.queue.shape[1] - ptr)]
+            self.queue[:, :ptr + batch_size - self.queue.shape[1]] = (keys.T)[:, (self.queue.shape[1] - ptr):]
+            if ec_numbers is not None:
+                self.ec_number_labels[ptr : ptr + batch_size] = ec_numbers[:(self.queue.shape[1] - ptr)]
+                self.ec_number_labels[:ptr + batch_size - self.queue.shape[1]] = ec_numbers[(self.queue.shape[1] - ptr):]
+        else:
+            self.queue[:, ptr : ptr + batch_size] = keys.T
+            if ec_numbers is not None:
+                self.ec_number_labels[ptr : ptr + batch_size] = ec_numbers
+        ptr = (ptr + batch_size) % self.K  # move pointer
+
+        self.queue_ptr[0] = ptr
+
+    def forward(self, im_q, im_k, ec_numbers=None):
+        """
+        Input:
+            im_q: a batch of query images
+            im_k: a batch of key images
+        Output:
+            logits, targets
+        """
+
+        # compute query features
+        q = self.encoder_q(im_q)  # queries: NxC
+        q = nn.functional.normalize(q, dim=1)
+
+        # compute key features
+        with torch.no_grad():  # no gradient to keys
+            self._momentum_update_key_encoder()  # update the key encoder
+            k = self.encoder_k(im_k)  # keys: NxC
+            k = nn.functional.normalize(k, dim=1)
+
+        # compute logits
+        # Einstein sum is more intuitive
+        # positive logits: Nx1
+        l_pos = torch.einsum("nc,nc->n", [torch.nn.functional.normalize(q), torch.nn.functional.normalize(k)]).unsqueeze(-1)
+        # negative logits: NxK
+        if torch.cuda.is_available():
+            l_neg = torch.einsum("nc,ck->nk", [q, self.queue.clone().cuda()])
+        else:
+            l_neg = torch.einsum("nc,ck->nk", [q, self.queue.clone()])
+        # logits: Nx(1+K)
+        # logits = torch.cat([l_pos, l_neg], dim=1)
+
+        # apply temperature
+        # logits /= self.T
+
+        # labels: positive key indicators
+        if torch.cuda.is_available():
+            labels = torch.zeros(l_pos.shape[0], dtype=torch.long).cuda()
+        else:
+            labels = torch.zeros(l_pos.shape[0], dtype=torch.long)
+        # dequeue and enqueue
+        self._dequeue_and_enqueue(k, ec_numbers)
+
+        if ec_numbers is None:
+            return l_pos, labels, q
+        else:
+            return l_pos, labels, self.ec_number_labels, q

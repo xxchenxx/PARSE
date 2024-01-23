@@ -17,8 +17,11 @@ parser.add_argument('dataset', type=str)
 parser.add_argument('embedding_outfile', type=str)
 parser.add_argument('funcsets_outfile', type=str)
 parser.add_argument('--source', type=str, default='M-CSA')
+parser.add_argument('--queue_size', type=int, default=1024)
 parser.add_argument('--pdb_dir', type=str, default='/scratch/users/aderry/pdb')
 parser.add_argument('--use_neighbors', action='store_true')
+parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
+parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only"])
 args = parser.parse_args()
 
 # os.makedirs(args.outfile, exist_ok=True)
@@ -55,10 +58,16 @@ esm_model = esm_model.to('cuda')
 batch_converter = alphabet.get_batch_converter()
 esm_model.eval()
 
-from CLEAN.model import MoCo
+from CLEAN.model import MoCo, MoCo_positive_only
+from CLEAN.simsiam import SimSiam
 
-model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
-model.load_state_dict(torch.load("best_demo_1702870147.059707_checkpoints.pth.tar")['model_state_dict'])
+if args.model == 'MoCo':
+    model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+elif args.model == 'SimSiam':
+    model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+elif args.model == 'MoCo_positive_only':
+    model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
 import os
 import urllib
 import requests as r
