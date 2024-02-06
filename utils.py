@@ -18,6 +18,8 @@ def pdb_from_fname(fname):
     elif 'AF' in fname:
         af_flag = True
         pdb = fname.split('-')[1]
+    else:
+        pdb = fname
     return pdb, af_flag
 
 def get_db_site_map(rnk):

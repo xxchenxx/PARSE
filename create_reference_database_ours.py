@@ -9,7 +9,7 @@ import torch
 import collections as col
 from collapse.data import SiteDataset, SiteNNDataset
 from torch_geometric.loader import DataLoader
-from collapse import initialize_model, atom_info
+
 from esm import pretrained
 
 parser = argparse.ArgumentParser()
@@ -21,10 +21,14 @@ parser.add_argument('--queue_size', type=int, default=1024)
 parser.add_argument('--pdb_dir', type=str, default='/scratch/users/aderry/pdb')
 parser.add_argument('--use_neighbors', action='store_true')
 parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
-parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only"])
+parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
 args = parser.parse_args()
 
 # os.makedirs(args.outfile, exist_ok=True)
+
+torch.backends.cudnn.benchmark = False
+# deteministic
+torch.backends.cudnn.deterministic = True
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -58,7 +62,7 @@ esm_model = esm_model.to('cuda')
 batch_converter = alphabet.get_batch_converter()
 esm_model.eval()
 
-from CLEAN.model import MoCo, MoCo_positive_only
+from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
 from CLEAN.simsiam import SimSiam
 
 if args.model == 'MoCo':
@@ -67,7 +71,14 @@ elif args.model == 'SimSiam':
     model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
 elif args.model == 'MoCo_positive_only':
     model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
-model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+elif args.model == 'Triplet':
+    model = LayerNormNet(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+try:
+    model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+except:
+    model.load_state_dict(torch.load(args.checkpoint))
+
+model.eval()
 import os
 import urllib
 import requests as r
@@ -84,9 +95,7 @@ with torch.no_grad():
 
         pdb_id = pdb[0][:4]
         chain = pdb[0][4:]
-        # print(pdb_id, chain)
         filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
-        
         for i in range(filtered.shape[0]):
             row = filtered.iloc[i]
             resid = int(g.resid[0][1:])
@@ -109,17 +118,23 @@ with torch.no_grad():
                     d = [
                         ("protein1", pSeq),
                     ]
+
                     batch_labels, batch_strs, batch_tokens = batch_converter(d)
                     batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
                     with torch.no_grad():
                         batch_tokens = batch_tokens.cuda()
                         results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
                     token_representations = results["representations"][12][:,1:-1]
-                    sequence_embedding = model.encoder_q(token_representations)[0]
+                    if 'MoCo' in args.model:
+                        sequence_embedding = model.encoder_q(token_representations)[0]
+                    elif args.model == 'SimSiam':
+                        # print(token_representations.shape)
+                        sequence_embedding = model.projector(token_representations.squeeze(0))
+                    elif args.model == 'Triplet':
+                        sequence_embedding = model(token_representations)[0]
                     embeddings = sequence_embedding[index]
                     current_pdb = pdb_id
                     current_chain = chain
-
         # embeddings, _ = model.online_encoder(g, return_projection=False)
         all_emb.append(embeddings.squeeze().cpu().numpy())
         all_pdb.append(pdb[0])

@@ -36,7 +36,6 @@ class LayerNormNet(nn.Module):
         self.fc3 = nn.Linear(hidden_dim, out_dim, dtype=dtype, device=device)
         self.dropout = nn.Dropout(p=drop_out)
 
-
     def forward(self, x):
         x = self.dropout(self.ln1(self.fc1(x)))
         x = torch.relu(x)
@@ -44,7 +43,6 @@ class LayerNormNet(nn.Module):
         x = torch.relu(x)
         x = self.fc3(x)
         return x
-
 
 
 class BatchNormNet(nn.Module):
@@ -490,12 +488,12 @@ class MoCo_with_SMILE(nn.Module):
 
 
 class MoCo_positive_only(nn.Module):
-    def __init__(self, hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=1280):
+    def __init__(self, hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=1280, queue_size=1000):
         super(MoCo_positive_only, self).__init__()
         self.K = 1000
         self.m = 0.999
         self.T = 0.07
-
+        self.queue_size = queue_size
         self.encoder_q = MoCoEncoder(hidden_dim, out_dim, device, dtype, drop_out=0.1, esm_model_dim=esm_model_dim)
         self.encoder_k = MoCoEncoder(hidden_dim, out_dim, device, dtype, drop_out=0.1,esm_model_dim=esm_model_dim)
 
