@@ -218,7 +218,7 @@ if __name__=="__main__":
     with open("results.txt", "a+") as f:
         for pdb, resid in zip(db['pdbs'], db['resids']):
             pdb, chain = pdb[:4], pdb[4]
-            if pdb < "1bwd":
+            if pdb < "1cjy":
                 continue
             if pdb in ['1al6', '1avq', '1bqc', '1bwd']:
                 continue

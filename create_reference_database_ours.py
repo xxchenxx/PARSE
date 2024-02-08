@@ -9,7 +9,7 @@ import torch
 import collections as col
 from collapse.data import SiteDataset, SiteNNDataset
 from torch_geometric.loader import DataLoader
-
+from utils import generate_struct_to_seq_map
 from esm import pretrained
 
 parser = argparse.ArgumentParser()
@@ -84,7 +84,7 @@ import urllib
 import requests as r
 from Bio import SeqIO
 from io import StringIO
-
+from collapse.data import process_pdb, atom_info
 
 baseUrl="http://www.uniprot.org/uniprot/"
 
@@ -95,26 +95,71 @@ with torch.no_grad():
 
         pdb_id = pdb[0][:4]
         chain = pdb[0][4:]
-        filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
-        for i in range(filtered.shape[0]):
+        if not (pdb_id == current_pdb and current_chain == chain):
+            filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
+        
+        for i in range(min(filtered.shape[0], 1)):
             row = filtered.iloc[i]
             resid = int(g.resid[0][1:])
+            atom_df = process_pdb(os.path.join(args.pdb_dir, pdb_id+'.pdb'), chain, False)
+            pdb_sequence = []
+            count = 0
+            current_resid = None
+            resid_to_index = {}
+            for i in range(len(atom_df)):
+                if atom_df.iloc[i]['residue'] != current_resid and atom_df.iloc[i]['chain'] == chain:
+                    pdb_sequence.append(atom_info.aa_to_letter(atom_df.iloc[i]['resname']))
+                    # print(pdb_sequence)
+                    current_resid = atom_df.iloc[i]['residue']
+                    resid_to_index[current_resid] = count + 1 # 1-indexed
+                    count += 1
+            pdb_sequence = ''.join(pdb_sequence)
             # print(g.resid[0], row['RES_BEG'], row['RES_END'])
             # print(resid, row['RES_BEG'], row['RES_END'])
-            if resid >= row['RES_BEG'] and resid <= row['RES_END']:
-                index = resid - row['RES_BEG'] + row['SP_BEG'] - 1
+            if True:
                 # print(index) - 1
+                # print(pdb_id)
                 if pdb_id == current_pdb and current_chain == chain:
-                    embeddings = sequence_embedding[index]
-                else:
-                    currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
-                    response = r.post(currentUrl)
-                    cData=''.join(response.text)
+                    resid_index = resid_to_index[resid]
+                    if resid_index not in reverse_structure_seq_map:
+                        print("A mismatch is detected at PDB {} and chain {} and resid {}. ".format(pdb_id, chain, resid))
+                        if resid_index - 1 in reverse_structure_seq_map:
+                            index = reverse_structure_seq_map[resid_index - 1]
+                            print("Using the left-side fix")
+                        elif resid_index + 1 in reverse_structure_seq_map:
+                            index = reverse_structure_seq_map[resid_index + 1] - 2
+                            print("Using the right-side fix")
 
-                    Seq=StringIO(cData)
-                    pSeq=SeqIO.parse(Seq, 'fasta')
-                    pSeq = list(pSeq)
-                    pSeq = str(pSeq[0].seq)
+                    else:
+                        index = reverse_structure_seq_map[resid_index] - 1
+                    embeddings = sequence_embedding[index]
+                    current_resid = resid
+                    current_chain = chain
+                else:
+                    # print(row['SP_PRIMARY'])
+                    if not os.path.exists(f"fasta_cache/{row['SP_PRIMARY']}.fasta"):
+                        currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                        # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
+                        response = r.post(currentUrl)
+                        cData=''.join(response.text)
+
+                        Seq=StringIO(cData)
+                        pSeq=SeqIO.parse(Seq, 'fasta')
+                        pSeq = list(pSeq)
+                        pSeq = str(pSeq[0].seq)
+                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "w") as f:
+                            f.write(pSeq)
+                    else:
+                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "r") as f:
+                            pSeq = f.read()
+                    try:
+                        structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
+                    except StopIteration:
+                        # for some reasons we fail here
+                        print("Warning: failed to generate structure to sequence map for PDB {} and chain {}.".format(pdb_id, chain))
+                        pSeq = pdb_sequence
+                        structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
+                    reverse_structure_seq_map = {v: k for k, v in structure_seq_map.items()}
                     d = [
                         ("protein1", pSeq),
                     ]
@@ -132,6 +177,14 @@ with torch.no_grad():
                         sequence_embedding = model.projector(token_representations.squeeze(0))
                     elif args.model == 'Triplet':
                         sequence_embedding = model(token_representations)[0]
+                    resid_index = resid_to_index[resid]
+                    if resid_index not in reverse_structure_seq_map:
+                        print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
+                        current_resid = resid
+                        current_chain = chain
+                        continue
+                    else:
+                        index = reverse_structure_seq_map[resid_index] - 1
                     embeddings = sequence_embedding[index]
                     current_pdb = pdb_id
                     current_chain = chain

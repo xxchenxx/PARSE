@@ -145,3 +145,13 @@ def generate_struct_to_seq_map(
         ):
             struc_seq_map[struct_seq_id] = int(seq_id)
     return struc_seq_map
+
+
+def open_pdb_and_return_sequence(pdb_file: str, chain: str) -> str:
+    """
+    Open a PDB file and return the sequence of the specified chain
+    """
+    
+    # filter in only normal amino acids
+
+    return chain.get_sequence()
