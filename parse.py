@@ -133,7 +133,7 @@ def compute_rank_df(pdb_data, db):
     pdb_resids = [x+'_'+y for x,y in zip(db['pdbs'], db['resids'])]
     
     pdb_id, af_flag = utils.pdb_from_fname(pdb_data["id"])
-    print(pdb_data)
+
     resids = np.array(pdb_data['resids'])
     chains = np.array(pdb_data['chains'])
     embeddings = np.array(pdb_data['embeddings'])
