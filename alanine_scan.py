@@ -186,7 +186,8 @@ if __name__=="__main__":
     parser.add_argument('--cutoff', type=float, default=0.001, help='FDR cutoff for reporting results')
     parser.add_argument('--use_gpu', action='store_true', help='Use GPU to embed proteins')
     parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
-    parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only"])
+    parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", 'Triplet'])
+    parser.add_argument('--output_name', type=str)
     parser.add_argument('--queue_size', type=int, default=1024)
     args = parser.parse_args()
     
@@ -199,27 +200,30 @@ if __name__=="__main__":
     
     # we don't need pdb input here
     
-    from CLEAN.model import MoCo, MoCo_positive_only
+    from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
     from CLEAN.simsiam import SimSiam
 
     if args.model == 'MoCo':
         model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     elif args.model == 'SimSiam':
         model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+    elif args.model == 'Triplet':
+        model = LayerNormNet(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
     elif args.model == 'MoCo_positive_only':
         model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
-    model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+    try:
+        model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+    except:
+        model.load_state_dict(torch.load(args.checkpoint))
     model.eval()
 
 
     original_results = {}
     changed_results = {}
     dropped = {}
-    with open("results.txt", "a+") as f:
+    with open(args.output_name, "a+") as f:
         for pdb, resid in zip(db['pdbs'], db['resids']):
             pdb, chain = pdb[:4], pdb[4]
-            if pdb < "1cjy":
-                continue
             if pdb in ['1al6', '1avq', '1bqc', '1bwd']:
                 continue
             

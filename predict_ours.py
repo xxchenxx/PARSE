@@ -189,7 +189,7 @@ def embed_protein_custom(model, atom_df, model_fn, pdb_id, device='cpu', include
                     with torch.no_grad():
                         batch_tokens = batch_tokens.cuda()
                         results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                    if args.prefix is not None:
+                    if args.prefix is None:
                         token_representations = results["representations"][12][:,1:-1]
                     else:
                         token_representations = results["representations"][12][:,1 + len(args.prefix):-1]
