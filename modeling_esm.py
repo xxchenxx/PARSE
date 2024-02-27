@@ -4,10 +4,12 @@ from torch import nn
 
 from transformers.models.esm.modeling_esm import *
 
+from peft import PeftModelForTokenClassification
+
 from peft import get_peft_config, PeftModel, PeftConfig, get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 
 from flash_attn import flash_attn_func
-from .utils import batched_split_long_seq, reverse_batched_split, concat_tensor_dict
+from model_utils import batched_split_long_seq, reverse_batched_split, concat_tensor_dict
 import esm
 
 from transformers import (
@@ -392,7 +394,8 @@ class ESM_PLM(torch.nn.Module):
         prefix_dropout=0.0,
         prefix_mid_dim=800,
         prefix_attn_bn=30,
-        protein_attention_type = 'vanilla'
+        protein_attention_type = 'vanilla',
+        esm_checkpoint = None,
 
     ):
         super(ESM_PLM, self).__init__()
@@ -492,6 +495,7 @@ class ESM_PLM(torch.nn.Module):
             else:
                 bnb_config = None
             
+            
             self.model = EsmForMaskedLMQuant.from_pretrained(model_name, quantization_config=bnb_config)
             self.model = set_attention_type(self.model, protein_attention_type)
             # self.model.encoder.layer
@@ -505,7 +509,10 @@ class ESM_PLM(torch.nn.Module):
                 self.model = prepare_model_for_kbit_training(self.model, use_gradient_checkpointing=False)
                 
                 self.model = get_peft_model(self.model, peft_config)
-                
+            
+            if esm_checkpoint is not None:
+                self.model.load_adapter(esm_checkpoint)
+
                 # self.model = self.model.to(dtype=torch.float16)
             # self.model.esm.encoder.layer
             # if model_splitting:

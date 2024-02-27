@@ -11,6 +11,8 @@ from collapse.data import SiteDataset, SiteNNDataset
 from torch_geometric.loader import DataLoader
 from utils import generate_struct_to_seq_map
 from esm import pretrained
+from transformers import AutoTokenizer, AutoModel
+from modeling_esm import ESM_PLM
 
 parser = argparse.ArgumentParser()
 parser.add_argument('dataset', type=str)
@@ -22,6 +24,8 @@ parser.add_argument('--pdb_dir', type=str, default='/scratch/users/aderry/pdb')
 parser.add_argument('--use_neighbors', action='store_true')
 parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
 parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
+parser.add_argument('--esm_checkpoint', type=str, default=None)
+parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
 args = parser.parse_args()
 
 # os.makedirs(args.outfile, exist_ok=True)
@@ -57,11 +61,18 @@ current_pdb = None
 current_chain = None
 embeddings = None
 sequence_embedding = None
-esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
-esm_model = esm_model.to('cuda')
-batch_converter = alphabet.get_batch_converter()
-esm_model.eval()
-
+if args.esm_checkpoint is None:
+    esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
+    esm_model = esm_model.to('cuda')
+    batch_converter = alphabet.get_batch_converter()
+    esm_model.eval()
+    is_lora_esm = False
+else:
+    esm_model = ESM_PLM('', esm_checkpoint=args.esm_checkpoint, num_params="official_35m")
+    tokenizer = AutoTokenizer.from_pretrained(args.esm_model)
+    is_lora_esm = True
+    esm_model = esm_model.to('cuda')
+    esm_model.eval()
 from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
 from CLEAN.simsiam import SimSiam
 
@@ -132,6 +143,7 @@ with torch.no_grad():
 
                     else:
                         index = reverse_structure_seq_map[resid_index] - 1
+                    
                     embeddings = sequence_embedding[index]
                     current_resid = resid
                     current_chain = chain
@@ -163,13 +175,19 @@ with torch.no_grad():
                     d = [
                         ("protein1", pSeq),
                     ]
-
-                    batch_labels, batch_strs, batch_tokens = batch_converter(d)
-                    batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
-                    with torch.no_grad():
-                        batch_tokens = batch_tokens.cuda()
-                        results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                    token_representations = results["representations"][12][:,1:-1]
+                    if not is_lora_esm:
+                        batch_labels, batch_strs, batch_tokens = batch_converter(d)
+                        batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
+                        with torch.no_grad():
+                            batch_tokens = batch_tokens.cuda()
+                            results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
+                        token_representations = results["representations"][12][:,1:-1]
+                    else:
+                        inputs = tokenizer(pSeq, return_tensors="pt", padding="longest", truncation=True, max_length=2048)
+                        inputs = {k: v.to('cuda') for k, v in inputs.items()}
+                        with torch.no_grad():
+                            outputs = esm_model(**inputs)
+                        token_representations = outputs
                     if 'MoCo' in args.model:
                         sequence_embedding = model.encoder_q(token_representations)[0]
                     elif args.model == 'SimSiam':
@@ -185,6 +203,11 @@ with torch.no_grad():
                         continue
                     else:
                         index = reverse_structure_seq_map[resid_index] - 1
+                    if index >= len(sequence_embedding):
+                        print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
+                        current_resid = resid
+                        current_chain = chain
+                        continue
                     embeddings = sequence_embedding[index]
                     current_pdb = pdb_id
                     current_chain = chain

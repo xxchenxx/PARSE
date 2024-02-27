@@ -15,7 +15,9 @@ from Bio import SeqIO
 from io import StringIO
 from utils import generate_struct_to_seq_map
 import os
-
+from transformers import AutoTokenizer, AutoModel
+from modeling_esm import ESM_PLM
+global esm_model, batch_converter, is_lora_esm, tokenizer
 torch.backends.cudnn.benchmark = False
 # deteministic
 torch.backends.cudnn.deterministic = True
@@ -122,15 +124,25 @@ def embed_protein_custom(model, atom_df, model_fn, pdb_id, device='cpu', include
                         d = [
                             ("protein1", pSeq_new),
                         ]
-                        batch_labels, batch_strs, batch_tokens = batch_converter(d)
-                        batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
-                        with torch.no_grad():
-                            batch_tokens = batch_tokens.cuda()
-                            results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                        if args.prefix is not None:
-                            token_representations = results["representations"][12][:,1:-1]
+                        if not is_lora_esm:
+                            batch_labels, batch_strs, batch_tokens = batch_converter(d)
+                            batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
+                            with torch.no_grad():
+                                batch_tokens = batch_tokens.cuda()
+                                results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
+                            if args.prefix is not None:
+                                token_representations = results["representations"][12][:,1:-1]
+                            else:
+                                token_representations = results["representations"][12][:,1 + len(args.prefix):-1]
+                            print(token_representations)
                         else:
-                            token_representations = results["representations"][12][:,1 + len(args.prefix):-1]
+                            inputs = tokenizer(pSeq, return_tensors="pt", padding="longest", truncation=True, max_length=2048)
+                            inputs = {k: v.to('cuda') for k, v in inputs.items()}
+                            with torch.no_grad():
+                                outputs = esm_model(**inputs)
+                            token_representations = outputs
+                            print(token_representations)
+                        
                         if 'MoCo' in args.model:
                             sequence_embedding = model.encoder_q(token_representations)[0].detach().cpu().numpy()
                         elif args.model == 'SimSiam':
@@ -184,15 +196,25 @@ def embed_protein_custom(model, atom_df, model_fn, pdb_id, device='cpu', include
                         ("protein1", pSeq),
                     ]
 
-                    batch_labels, batch_strs, batch_tokens = batch_converter(d)
-                    batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
-                    with torch.no_grad():
-                        batch_tokens = batch_tokens.cuda()
-                        results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                    if args.prefix is None:
-                        token_representations = results["representations"][12][:,1:-1]
+                    if not is_lora_esm:
+                        batch_labels, batch_strs, batch_tokens = batch_converter(d)
+                        batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
+                        with torch.no_grad():
+                            batch_tokens = batch_tokens.cuda()
+                            results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
+                        if args.prefix is not None:
+                            token_representations = results["representations"][12][:,1:-1]
+                        else:
+                            token_representations = results["representations"][12][:,1 + len(args.prefix):-1]
+                        print(token_representations)
+                        
                     else:
-                        token_representations = results["representations"][12][:,1 + len(args.prefix):-1]
+                        inputs = tokenizer(pSeq, return_tensors="pt", padding="longest", truncation=True, max_length=2048)
+                        inputs = {k: v.to('cuda') for k, v in inputs.items()}
+                        with torch.no_grad():
+                            outputs = esm_model(**inputs)
+                        token_representations = outputs
+                        print(token_representations)
                     if 'MoCo' in args.model:
                         sequence_embedding = model.encoder_q(token_representations)[0].detach().cpu().numpy()
                     elif args.model == 'SimSiam':
@@ -227,8 +249,25 @@ if __name__=="__main__":
     parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
     parser.add_argument('--queue_size', type=int, default=1024)
     parser.add_argument('--prefix', type=str, default=None)
+    parser.add_argument('--esm_checkpoint', type=str, default=None)
+    parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
+
     args = parser.parse_args()
     
+    
+    if args.esm_checkpoint is None:
+        esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
+        esm_model = esm_model.to('cuda')
+        batch_converter = alphabet.get_batch_converter()
+        esm_model.eval()
+        is_lora_esm = False
+        
+    else:
+        esm_model = ESM_PLM('', esm_checkpoint=args.esm_checkpoint, num_params="official_35m")
+        tokenizer = AutoTokenizer.from_pretrained(args.esm_model)
+        is_lora_esm = True
+        esm_model = esm_model.to('cuda')
+        esm_model.eval()
     start = time.time()
     device = 'cuda' if args.use_gpu else 'cpu'
     
