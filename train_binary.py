@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 import pandas as pd
 import esm
 import os
+import re
 
 class ProteinDataset(Dataset):
     def __init__(self, embeddings, labels):
@@ -26,10 +27,7 @@ def load_embeddings_and_labels(sequence_file, label_file, esm_model, esm_alphabe
                 current_id = line[1:].strip().replace("_", "")
             else:
                 seq = line.strip()
-                if current_id in sequences:
-                    sequences[current_id] += seq
-                else:
-                    sequences[current_id] = seq
+                sequences[current_id] = seq
     
     labels = pd.read_csv(label_file)
     label_dict = {row['pdb']: eval(row['locs']) for index, row in labels.iterrows()} 
@@ -39,8 +37,14 @@ def load_embeddings_and_labels(sequence_file, label_file, esm_model, esm_alphabe
 
     os.makedirs(esm_cache_path, exist_ok=True)
 
+    pdb_to_beg = {}
+    offsets = pd.read_csv("pdb_chain_uniprot.csv")
+    pdb_to_beg = {f"{row['PDB']}{row['CHAIN']}": row['PDB_BEG'] for index, row in offsets.iterrows()} 
     embeddings, label_vectors = {}, {}
     for pdb_id, seq in sequences.items():
+        if pdb_id not in pdb_to_beg or not re.fullmatch(r"-?\d+", pdb_to_beg[pdb_id]):
+            print("Skipping")
+            continue
         embedding_path = os.path.join(esm_cache_path, f"{pdb_id}.pt")
         if os.path.exists(embedding_path):
             embeddings[pdb_id] = torch.load(embedding_path)
@@ -57,8 +61,9 @@ def load_embeddings_and_labels(sequence_file, label_file, esm_model, esm_alphabe
         label_vector = torch.zeros(len(seq), dtype=torch.float32)
         if pdb_id in label_dict:
             for site in label_dict[pdb_id]:
-                if site-1 < len(seq):
-                    label_vector[site-1] = 1.0
+                pdb_offset = int(pdb_to_beg[pdb_id])
+                if site-pdb_offset < len(label_vector):
+                    label_vector[site-pdb_offset] = 1.0
         label_vectors[pdb_id] = label_vector
 
     embeddings_list, label_vectors_list = [], []
@@ -70,19 +75,17 @@ def load_embeddings_and_labels(sequence_file, label_file, esm_model, esm_alphabe
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(MLP, self).__init__()
-        self.flatten = nn.Flatten()
         self.layers = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, output_size),
-            nn.Sigmoid()
+            nn.Dropout(p=0.5),
+            nn.Linear(hidden_size, output_size)
         )
 
     def forward(self, x):
-        x = self.flatten(x)
         return self.layers(x).squeeze()
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, epochs=50):
+def train_model(model, train_loader, test_loader, criterion, optimizer, epochs=10):
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -91,19 +94,20 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, epochs=5
             optimizer.zero_grad()
             outputs = model(embeddings)
             loss = criterion(outputs, labels)
-            total_loss += loss.item()
+            total_loss += loss.item() * embeddings.size(0)
             loss.backward()
             optimizer.step()
-        print(f'Epoch {epoch+1}, Training Loss: {total_loss}')
+        print(f'Epoch {epoch+1}, Training Loss: {total_loss/len(train_loader.dataset)}')
         total_loss = 0
         with torch.no_grad():
             for embeddings, labels in test_loader:
                 embeddings, labels = embeddings.to(device), labels.to(device)
+                
                 optimizer.zero_grad()
                 outputs = model(embeddings)
                 loss = criterion(outputs, labels)
-                total_loss += loss.item()
-        print(f'Epoch {epoch+1}, Test Loss: {total_loss}')
+                total_loss += loss.item() * embeddings.size(0)
+        print(f'Epoch {epoch+1}, Validation Loss: {total_loss/len(test_loader.dataset)}')
 
 def predict(model, sequence):
     embedding = torch.tensor(sequence)
@@ -114,10 +118,10 @@ def predict(model, sequence):
 
 if __name__ == "__main__":
     input_size = 480
-    hidden_size = 512
+    hidden_size = 1024
     output_size = 1
     learning_rate = 0.001
-    batch_size = 32
+    batch_size = 128
     epochs = 10
     torch.manual_seed(42)
     torch.backends.cudnn.deterministic = True
@@ -130,8 +134,8 @@ if __name__ == "__main__":
     test_size = dataset_size - train_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     
     model = MLP(input_size, hidden_size, output_size).to(device)
 
@@ -149,13 +153,17 @@ if __name__ == "__main__":
     correct_negative = 0
     total_positive = 0
     total_negative = 0
+    sum_output_for_1s = 0
+    sum_output_for_0s = 0
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            
+            output = torch.sigmoid(output)
             predicted = (output > 0.5).float()
             
+            sum_output_for_1s += output[target == 1].sum().item()
+            sum_output_for_0s += output[target == 0].sum().item()
             correct_positive += ((predicted == 1) & (target == 1)).sum().item()
             correct_negative += ((predicted == 0) & (target == 0)).sum().item()
             total_positive += (target == 1).sum().item()
@@ -163,6 +171,10 @@ if __name__ == "__main__":
 
     positive_accuracy = 100 * correct_positive / total_positive if total_positive > 0 else 0
     negative_accuracy = 100 * correct_negative / total_negative if total_negative > 0 else 0
+    average_output_for_1s = sum_output_for_1s / total_positive if total_positive else 0
+    average_output_for_0s = sum_output_for_0s / total_negative if total_negative else 0
 
     print(f'Positive accuracy: {positive_accuracy:.2f}% ({correct_positive}/{total_positive})')
     print(f'Negative accuracy: {negative_accuracy:.2f}% ({correct_negative}/{total_negative})')
+    print("Average output for 1s:", average_output_for_1s)
+    print("Average output for 0s:", average_output_for_0s)
