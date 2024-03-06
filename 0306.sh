@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=3 nohup python alanine_scan.py --function_sets database_triplet_small_neg_aug_only/csa_function_sets_nn.pkl --db database_triplet_small_neg_aug_only/csa_site_db_nn.pkl --pdb_dir pdb/ --cutoff 1e-6 --model Triplet --checkpoint triplet_small_neg_aug_only.pth --queue_size 1024 --output_name alanine_scan_triplet_small_neg_aug_only.txt &
