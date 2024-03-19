@@ -276,12 +276,13 @@ if __name__=="__main__":
     background_dists = utils.deserialize(args.background)
     
     from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
-    from CLEAN.simsiam import SimSiam
+    # from CLEAN.simsiam import SimSiam
 
     if args.model == 'MoCo':
         model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     elif args.model == 'SimSiam':
-        model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        # model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        pass
     elif args.model == 'MoCo_positive_only':
         model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     elif args.model == 'Triplet':
@@ -305,13 +306,13 @@ if __name__=="__main__":
         assert False
 
     rnk = parse.compute_rank_df(embed_data, db)
-    full_result = parse.parse(rnk, function_sets, background_dists, cutoff=1)
+    # full_result = parse.parse(rnk, function_sets, background_dists, cutoff=1)
     pdb_id = args.pdb.split("/")[-1].split(".")[0]
     rnk.to_csv(f"ours_rnk_{pdb_id}.csv")
-    full_result.to_csv(f'ours_{pdb_id}_full_result.csv')
-    results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
-    results.to_csv(f'ours_{pdb_id}_cutoff_{args.cutoff}.csv')
+    # full_result.to_csv(f'ours_{pdb_id}_full_result.csv')
+    # results = parse.parse(rnk, function_sets, background_dists, cutoff=args.cutoff)
+    # results.to_csv(f'ours_{pdb_id}_cutoff_{args.cutoff}.csv')
 
-    print(results)
-    print(f'Finished in {time.time() - start:.2f} seconds')
+    # print(results)
+    # print(f'Finished in {time.time() - start:.2f} seconds')
     

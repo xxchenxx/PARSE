@@ -13,7 +13,7 @@ from utils import generate_struct_to_seq_map
 from esm import pretrained
 from transformers import AutoTokenizer, AutoModel
 from modeling_esm import ESM_PLM
-
+import urllib
 parser = argparse.ArgumentParser()
 parser.add_argument('dataset', type=str)
 parser.add_argument('embedding_outfile', type=str)
@@ -74,12 +74,13 @@ else:
     esm_model = esm_model.to('cuda')
     esm_model.eval()
 from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
-from CLEAN.simsiam import SimSiam
+# from CLEAN.simsiam import SimSiam
 
 if args.model == 'MoCo':
     model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
 elif args.model == 'SimSiam':
-    model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    # model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    pass
 elif args.model == 'MoCo_positive_only':
     model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
 elif args.model == 'Triplet':
@@ -112,6 +113,7 @@ with torch.no_grad():
         for i in range(min(filtered.shape[0], 1)):
             row = filtered.iloc[i]
             resid = int(g.resid[0][1:])
+                
             atom_df = process_pdb(os.path.join(args.pdb_dir, pdb_id+'.pdb'), chain, False)
             pdb_sequence = []
             count = 0
