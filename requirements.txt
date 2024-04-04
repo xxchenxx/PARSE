@@ -4,3 +4,5 @@ fastdist
 scikit-learn
 matplotlib
 numba
+gemmi
+fair-esm
