@@ -24,7 +24,6 @@ labels = [
 '1oth',
 '1oth']
 funcs = None
-import pandas as pd
 
 f1 = open("results_mean.txt", "w")
 f2 = open("results_lb.txt", "w")

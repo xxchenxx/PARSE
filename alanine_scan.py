@@ -201,12 +201,13 @@ if __name__=="__main__":
     # we don't need pdb input here
     
     from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
-    from CLEAN.simsiam import SimSiam
+    # from CLEAN.simsiam import SimSiam
 
     if args.model == 'MoCo':
         model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     elif args.model == 'SimSiam':
-        model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        # model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        pass
     elif args.model == 'Triplet':
         model = LayerNormNet(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
     elif args.model == 'MoCo_positive_only':
