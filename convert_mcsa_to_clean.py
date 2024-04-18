@@ -9,19 +9,30 @@ import torch
 import collections as col
 from collapse.data import SiteDataset, SiteNNDataset
 from torch_geometric.loader import DataLoader
-from collapse import initialize_model, atom_info
+from utils import generate_struct_to_seq_map
 from esm import pretrained
-
+from transformers import AutoTokenizer, AutoModel
+from modeling_esm import ESM_PLM
+import urllib
 parser = argparse.ArgumentParser()
 parser.add_argument('dataset', type=str)
 parser.add_argument('embedding_outfile', type=str)
 parser.add_argument('funcsets_outfile', type=str)
 parser.add_argument('--source', type=str, default='M-CSA')
+parser.add_argument('--queue_size', type=int, default=1024)
 parser.add_argument('--pdb_dir', type=str, default='/scratch/users/aderry/pdb')
 parser.add_argument('--use_neighbors', action='store_true')
+parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.059707_checkpoints.pth.tar')
+parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
+parser.add_argument('--esm_checkpoint', type=str, default=None)
+parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
 args = parser.parse_args()
 
 # os.makedirs(args.outfile, exist_ok=True)
+
+torch.backends.cudnn.benchmark = False
+# deteministic
+torch.backends.cudnn.deterministic = True
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -50,88 +61,56 @@ current_pdb = None
 current_chain = None
 embeddings = None
 sequence_embedding = None
-esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
-esm_model = esm_model.to('cuda')
-batch_converter = alphabet.get_batch_converter()
-esm_model.eval()
+of = open("mcsa_to_clean.csv", "w")
 
-from CLEAN.model import MoCo
-
-model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
-model.load_state_dict(torch.load("best_demo_1702870147.059707_checkpoints.pth.tar")['model_state_dict'])
+of.write("Entry	EC number	Sequence\n")
 import os
 import urllib
 import requests as r
 from Bio import SeqIO
 from io import StringIO
-
+from collapse.data import process_pdb, atom_info
 
 baseUrl="http://www.uniprot.org/uniprot/"
 
 from tqdm import tqdm
-import pickle
-dataset = pickle.load(open("data/csa_site_db_nn.pkl", "rb"))
 with torch.no_grad():
-    # for g, pdb, source, desc in tqdm(loader):
-    for resid, pdb, source, desc in tqdm(zip(dataset['resids'], dataset['pdbs'], dataset['sources'], dataset['sites'])):
-        # g = g.to(device)
+    for g, pdb, source, desc in tqdm(loader):
+        g = g.to(device)
 
-        pdb_id = pdb[:4]
-        chain = pdb[4:]
-
-        filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
+        pdb_id = pdb[0][:4]
+        chain = pdb[0][4:]
+        if not (pdb_id == current_pdb and current_chain == chain):
+            filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
         
-        for i in range(filtered.shape[0]):
+        for i in range(min(filtered.shape[0], 1)):
             row = filtered.iloc[i]
-            # print(resid)
-            n_resid = int(resid[1:])
-            # print(g.resid[0], row['RES_BEG'], row['RES_END'])
-            # print(resid, row['RES_BEG'], row['RES_END'])
-            if n_resid >= row['RES_BEG'] and n_resid <= row['RES_END']:
-                index = n_resid - row['RES_BEG'] + row['SP_BEG'] - 1
-                # print(index) - 1
+            resid = int(g.resid[0][1:])
+                
+            atom_df = process_pdb(os.path.join(args.pdb_dir, pdb_id+'.pdb'), chain, False)
+            if True:
                 if pdb_id == current_pdb and current_chain == chain:
-                    embeddings = sequence_embedding[index]
+                    pass
                 else:
-                    currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
-                    response = r.post(currentUrl)
-                    cData=''.join(response.text)
+                    # print(row['SP_PRIMARY'])
+                    if not os.path.exists(f"fasta_cache/{row['SP_PRIMARY']}.fasta"):
+                        currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                        # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
+                        response = r.post(currentUrl)
+                        cData=''.join(response.text)
 
-                    Seq=StringIO(cData)
-                    pSeq=SeqIO.parse(Seq, 'fasta')
-                    pSeq = list(pSeq)
-                    pSeq = str(pSeq[0].seq)
-                    d = [
-                        ("protein1", pSeq),
-                    ]
-                    batch_labels, batch_strs, batch_tokens = batch_converter(d)
-                    batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
-                    with torch.no_grad():
-                        batch_tokens = batch_tokens.cuda()
-                        results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                    token_representations = results["representations"][12][:,1:-1]
-                    sequence_embedding = model.encoder_q(token_representations)[0]
-                    embeddings = sequence_embedding[index]
+                        Seq=StringIO(cData)
+                        pSeq=SeqIO.parse(Seq, 'fasta')
+                        pSeq = list(pSeq)
+                        pSeq = str(pSeq[0].seq)
+                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "w") as f:
+                            f.write(pSeq)
+                    else:
+                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "r") as f:
+                            pSeq = f.read()
+                    
+                    of.write(f"{row['SP_PRIMARY']}	{pdb_id}	{pSeq}\n")
                     current_pdb = pdb_id
                     current_chain = chain
 
-        # embeddings, _ = model.online_encoder(g, return_projection=False)
-        all_emb.append(embeddings.squeeze().cpu().numpy())
-        all_pdb.append(pdb)
-        all_sites.append(desc)
-        all_sources.append(source)
-        all_resids.append(resid)
-     
-print('Saving...')
-all_emb = np.stack(all_emb)
-outdata = {'embeddings': all_emb.copy(), 'pdbs': all_pdb, 'resids': all_resids, 'sites': all_sites, 'sources': all_sources}
-pdb_resids = [x+'_'+y for x,y in zip(all_pdb, all_resids)]
-
-with open(args.embedding_outfile, 'wb') as f:
-    pickle.dump(outdata, f)
-    
-fn_lists = col.defaultdict(set)
-for fn, site in zip(all_sites, pdb_resids):
-    fn_lists[f'{fn}'].add(str(site))
-with open(args.funcsets_outfile, 'wb') as f:
-    pickle.dump({k: list(v) for k,v in fn_lists.items()}, f)
+of.close()

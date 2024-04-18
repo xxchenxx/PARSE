@@ -1,0 +1,6 @@
+# mkdir msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K
+CUDA_VISIBLE_DEVICES=2 python create_reference_database_ours.py data/csa_functional_sites.csv msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_site_db_nn.pkl msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_function_sets_nn.pkl --pdb_dir pdb/ --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K.pth 
+
+CUDA_VISIBLE_DEVICES=2 nohup python predict_ours_batch_prediction.py --function_sets msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_function_sets_nn.pkl --db msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_site_db_nn.pkl --pdb_dir test_pdb --cutoff 1e-6 --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K.pth   --queue_size 1024 --output_dir pos_weak_neg_aug > pos_weak_neg_aug.out &
+
+CUDA_VISIBLE_DEVICES=3 nohup python alanine_scan.py --function_sets msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_function_sets_nn.pkl --db msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K/csa_site_db_nn.pkl --pdb_dir pdb/ --cutoff 1e-6 --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K.pth --queue_size 1024 --output_name pos_weak_neg_aug.txt &
