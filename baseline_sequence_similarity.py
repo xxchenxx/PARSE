@@ -66,6 +66,7 @@ for i, row in query_proteins.iterrows():
         except:
             similarity_matrix[i, j] = -1
 
+np.save("similarity_matrix.npy", similarity_matrix)
 pdbs = [x[:4] for x in pdbs]
 df = pd.DataFrame(similarity_matrix, columns=pdbs, index=query_proteins['label'])
 df.to_csv("similarity_matrix.csv")
