@@ -16,6 +16,32 @@ sequence_dict_reference = {}
 sequence_dict_query = {}
 baseUrl = "http://www.uniprot.org/uniprot/"
 from tqdm import tqdm
+query_proteins = pd.read_csv("test_pdb_hard/ids.csv")
+
+for row in tqdm(query_proteins.iterrows()):
+    pdb = row[1]['label']
+    uniprot = row[1]['id']
+    
+    if not os.path.exists(f"fasta_cache/{uniprot}.fasta"):
+        currentUrl=baseUrl + uniprot + ".fasta"
+        # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
+        print(uniprot)
+        response = r.post(currentUrl)
+        cData=''.join(response.text)
+        Seq=StringIO(cData)
+        pSeq=SeqIO.parse(Seq, 'fasta')
+        pSeq = list(pSeq)
+        if len(pSeq) == 0:
+            continue
+        pSeq = str(pSeq[0].seq)
+        with open(f"fasta_cache/{uniprot}.fasta", "w") as f:
+            f.write(pSeq)
+    else:
+        with open(f"fasta_cache/{uniprot}.fasta", "r") as f:
+            pSeq = f.read()
+    sequence_dict_query[uniprot] = pSeq
+    
+print(len(sequence_dict_query))
 for pdb in tqdm(pdbs):
     # get the uniprot id
     pdb = pdb[:4]
@@ -43,30 +69,13 @@ for pdb in tqdm(pdbs):
         continue
     sequence_dict_reference[pdb] = pSeq
 
-query_proteins = pd.read_csv("test_pdb_hard/ids.csv")
-
-for row in tqdm(query_proteins.iterrows()):
-    pdb = row[1]['label']
-    uniprot = row[1]['id']
-    try:
-        with open(f"fasta_cache/{uniprot}.fasta", "r") as f:
-            pSeq = f.read()
-        sequence_dict_query[pdb] = pSeq
-    except:
-        continue
-
-similarity_matrix = np.zeros((len(pdbs), len(glob("test_pdb_hard/*.pdb")))).T
-for i, row in query_proteins.iterrows():
-    for j, pdb2 in enumerate(pdbs):
-        pdb = row['label']
-        pdb2 = pdb2[:4]
+similarity_matrix = np.zeros((len(sequence_dict_reference), len(sequence_dict_query)))
+for i, pdb1 in enumerate(tqdm(sequence_dict_reference.keys())):
+    for j, pdb2 in enumerate(tqdm(sequence_dict_query.keys())):
         # similarity_matrix[i, j] = score.align.globalxx(sequence_dict_query[pdb], sequence_dict_reference[pdb2])
-        try:
-            similarity_matrix[i, j] = score.align.globalxx(sequence_dict_query[pdb], sequence_dict_reference[pdb2])[0].score
-        except:
-            similarity_matrix[i, j] = -1
+        similarity_matrix[i, j] = similarity_matrix[i, j] = score.align.globalxx(sequence_dict_reference[pdb1], sequence_dict_query[pdb2])[0].score
 
 np.save("similarity_matrix.npy", similarity_matrix)
 pdbs = [x[:4] for x in pdbs]
-df = pd.DataFrame(similarity_matrix, columns=pdbs, index=query_proteins['label'])
+df = pd.DataFrame(similarity_matrix, columns=list(sequence_dict_query.keys()), index=list(sequence_dict_reference.keys()))
 df.to_csv("similarity_matrix.csv")

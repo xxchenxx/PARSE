@@ -99,7 +99,7 @@ def embed_protein_custom(model, atom_df, model_fn, pdb_id, device='cpu', include
                         row = filtered.iloc[i]
 
                         if not os.path.exists(f"fasta_cache/{uniprot}.fasta"):
-                            currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                            currentUrl=baseUrl + uniprot + ".fasta"
                             # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
                             response = r.post(currentUrl)
                             cData=''.join(response.text)
