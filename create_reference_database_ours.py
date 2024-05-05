@@ -26,6 +26,9 @@ parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.0597
 parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
 parser.add_argument('--esm_checkpoint', type=str, default=None)
 parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
+parser.add_argument('--hidden_dim', type=int, default=512)
+parser.add_argument('--out_dim', type=int, default=128)
+
 args = parser.parse_args()
 
 # os.makedirs(args.outfile, exist_ok=True)
@@ -77,14 +80,14 @@ from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
 # from CLEAN.simsiam import SimSiam
 
 if args.model == 'MoCo':
-    model = MoCo(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    model = MoCo(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
 elif args.model == 'SimSiam':
-    # model = SimSiam(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    # model = SimSiam(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     pass
 elif args.model == 'MoCo_positive_only':
-    model = MoCo_positive_only(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    model = MoCo_positive_only(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
 elif args.model == 'Triplet':
-    model = LayerNormNet(512, 128, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+    model = LayerNormNet(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
 try:
     model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
 except:
