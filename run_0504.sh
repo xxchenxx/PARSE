@@ -23,3 +23,11 @@ nohup python summarize_new.py --dir pos_weak_neg_aug_ep100_version2_16000_hard_2
 nohup python summarize_new.py --dir pos_weak_neg_aug_ep100_version2_16000_hard_4x --mapping test_pdb_hard/ids.csv --output pos_weak_neg_aug_ep100_version2_16000_hard_4x &
 
 nohup python summarize_new.py --dir pos_weak_neg_aug_ep100_version2_16000_hard_8x --mapping test_pdb_hard/ids.csv --output pos_weak_neg_aug_ep100_version2_16000_hard_8x &
+
+
+CUDA_VISIBLE_DEVICES=0 nohup python alanine_scan.py --function_sets msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_2x/csa_function_sets_nn.pkl --db msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_2x/csa_site_db_nn.pkl --pdb_dir pdb/ --cutoff 1e-6 --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_2x.pth --queue_size 1024 --output_name pos_weak_neg_aug_ep100_version2_16000_2x.txt &
+
+CUDA_VISIBLE_DEVICES=1 nohup python alanine_scan.py --function_sets msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_4x/csa_function_sets_nn.pkl --db msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_4x/csa_site_db_nn.pkl --pdb_dir pdb/ --cutoff 1e-6 --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_4x.pth --queue_size 1024 --output_name pos_weak_neg_aug_ep100_version2_16000_4x.txt &
+
+CUDA_VISIBLE_DEVICES=2 nohup python alanine_scan.py --function_sets msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_8x/csa_function_sets_nn.pkl --db msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_8x/csa_site_db_nn.pkl --pdb_dir pdb/ --cutoff 1e-6 --model MoCo --checkpoint msa_mcsa_rcsb_pos_weak_neg_aug_sampled100K_0402_version2_16000_8x.pth --queue_size 1024 --output_name pos_weak_neg_aug_ep100_version2_16000_8x.txt &
+
