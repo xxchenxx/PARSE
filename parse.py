@@ -108,17 +108,42 @@ def parse(rank_df, function_sets, background_dists, cutoff=0.001):
     in_df = rank_df[['site', 'score']]
     in_df.columns = [0, 1]
     result = enrichment(in_df, function_sets, min_size=2)
-    result.to_csv("intermediate.csv")
     result['empirical_pval'] = result.apply(lambda x: get_pval(x, function_score_dists=background_dists), axis=1)
     result['empirical_FDR'] = false_discovery_control(result['empirical_pval'], method='bh')
     result['ref_sites'] = [x.split(',') for x in np.nan_to_num(result['ref_sites'].tolist(), '')]
     site_map, res_match = utils.get_db_site_map(rank_df)
     result['hit_sites'] = [set([site_map.get(x, 'N/A') for x in l]) for l in result['ref_sites']]
     # result['res_match'] = [[res_match.get(x, 'N/A') for x in l] for l in result['ref_sites']]
-    result = result[result['hit_sites'].apply(lambda x: len(x) >= 2)]
-    result.to_csv("intermediate_filtered.csv")
+    # result = result[result['hit_sites'].apply(lambda x: len(x) >= 2)]
     return result[result['empirical_FDR'] < cutoff]
     
+def parse_return_all(rank_df, function_sets, background_dists, cutoff=0.001):
+    """Main wrapper for PARSE, given ranked list of sites
+    
+    :param rank_df: ranked list dataframe with at least 2 columns: site, score
+    :type rank_df: pd.DataFrame
+    :param function_sets: function sets to test for enrichment
+    :type function_sets: dict
+    :param background_dists: function-specific background distributions: keys = function name, values = list of scores
+    :type background_dists: dict
+    :cutoff: empirical FDR cutoff for results, defaults to 0.001
+    :type cutoff: float, optional
+    
+    :return: enrichment results dataframe with 8 columns: function, enrichment score, set size, leading edge residues, empirical p-value, empirical FDR, reference DB sites, query hit sites
+    :rtype: pd.DataFrame
+    """
+    in_df = rank_df[['site', 'score']]
+    in_df.columns = [0, 1]
+    result = enrichment(in_df, function_sets, min_size=2)
+    result['empirical_pval'] = result.apply(lambda x: get_pval(x, function_score_dists=background_dists), axis=1)
+    result['empirical_FDR'] = false_discovery_control(result['empirical_pval'], method='bh')
+    result['ref_sites'] = [x.split(',') for x in np.nan_to_num(result['ref_sites'].tolist(), '')]
+    site_map, res_match = utils.get_db_site_map(rank_df)
+    result['hit_sites'] = [set([site_map.get(x, 'N/A') for x in l]) for l in result['ref_sites']]
+    # result['res_match'] = [[res_match.get(x, 'N/A') for x in l] for l in result['ref_sites']]
+    # result = result[result['hit_sites'].apply(lambda x: len(x) >= 2)]
+    return result
+
 def compute_rank_df(pdb_data, db):
     """Compute ranked list of DB sites based on distance to query residues
 
@@ -152,9 +177,9 @@ def compute_rank_df(pdb_data, db):
     max_values = np.amax(cosines, 0)
 
     out_df = pd.DataFrame({'site': pdb_resids, 'score': max_values, 'location': resids[max_site_idx]})
+    print(out_df)
     out_df = out_df.sort_values('score', ascending=False)
     out_df = out_df.drop_duplicates('site').reset_index(drop=True)
-    
     return out_df
 
 def compute_rank_df_for_background(embeddings, db):

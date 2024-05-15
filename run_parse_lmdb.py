@@ -37,10 +37,12 @@ if __name__=="__main__":
         print(f'Processing full dataset with {len(dataset)} examples...')
 
     results = {}
+    rank_files = {}
     for pdb_data in tqdm(dataset):
         protein = pdb_data['id']
         rnk = parse.compute_rank_df(pdb_data, db)
         result = parse.parse(rnk, function_sets, background_dists, args.cutoff)
         results[protein] = result.copy()
-        
-    utils.serialize(results)
+        rank_files[protein] = rnk
+    utils.serialize(results, "results.pkl")
+    utils.serialize(rank_files, "rank_files.pkl")

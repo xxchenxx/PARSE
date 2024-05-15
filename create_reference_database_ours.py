@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 from utils import generate_struct_to_seq_map
 from esm import pretrained
 from transformers import AutoTokenizer, AutoModel
-from modeling_esm import ESM_PLM
+# from modeling_esm import ESM_PLM
 import urllib
 parser = argparse.ArgumentParser()
 parser.add_argument('dataset', type=str)
@@ -26,6 +26,7 @@ parser.add_argument('--checkpoint', type=str, default='best_demo_1702870147.0597
 parser.add_argument('--model', type=str, default='MoCo', choices=['MoCo', 'SimSiam', "MoCo_positive_only", "Triplet"])
 parser.add_argument('--esm_checkpoint', type=str, default=None)
 parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
+parser.add_argument('--esm_model_dim', type=int, default=480)
 parser.add_argument('--hidden_dim', type=int, default=512)
 parser.add_argument('--out_dim', type=int, default=128)
 
@@ -65,7 +66,7 @@ current_chain = None
 embeddings = None
 sequence_embedding = None
 if args.esm_checkpoint is None:
-    esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
+    esm_model, alphabet = pretrained.load_model_and_alphabet(args.esm_model)
     esm_model = esm_model.to('cuda')
     batch_converter = alphabet.get_batch_converter()
     esm_model.eval()
@@ -80,14 +81,14 @@ from CLEAN.model import MoCo, MoCo_positive_only, LayerNormNet
 # from CLEAN.simsiam import SimSiam
 
 if args.model == 'MoCo':
-    model = MoCo(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    model = MoCo(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim, queue_size=args.queue_size).cuda()
 elif args.model == 'SimSiam':
     # model = SimSiam(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
     pass
 elif args.model == 'MoCo_positive_only':
-    model = MoCo_positive_only(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+    model = MoCo_positive_only(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim, queue_size=args.queue_size).cuda()
 elif args.model == 'Triplet':
-    model = LayerNormNet(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+    model = LayerNormNet(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim,).cuda()
 try:
     model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
 except:
@@ -112,111 +113,108 @@ with torch.no_grad():
         chain = pdb[0][4:]
         if not (pdb_id == current_pdb and current_chain == chain):
             filtered = mapping[(mapping['PDB'] == pdb_id) & (mapping['CHAIN'] == chain)]
-        
-        for i in range(min(filtered.shape[0], 1)):
-            row = filtered.iloc[i]
-            resid = int(g.resid[0][1:])
-                
-            atom_df = process_pdb(os.path.join(args.pdb_dir, pdb_id+'.pdb'), chain, False)
-            pdb_sequence = []
-            count = 0
-            current_resid = None
-            resid_to_index = {}
-            for i in range(len(atom_df)):
-                if atom_df.iloc[i]['residue'] != current_resid and atom_df.iloc[i]['chain'] == chain:
-                    pdb_sequence.append(atom_info.aa_to_letter(atom_df.iloc[i]['resname']))
-                    # print(pdb_sequence)
-                    current_resid = atom_df.iloc[i]['residue']
-                    resid_to_index[current_resid] = count + 1 # 1-indexed
-                    count += 1
-            pdb_sequence = ''.join(pdb_sequence)
-            # print(g.resid[0], row['RES_BEG'], row['RES_END'])
-            # print(resid, row['RES_BEG'], row['RES_END'])
-            if True:
-                # print(index) - 1
-                # print(pdb_id)
-                if pdb_id == current_pdb and current_chain == chain:
-                    resid_index = resid_to_index[resid]
-                    if resid_index not in reverse_structure_seq_map:
-                        print("A mismatch is detected at PDB {} and chain {} and resid {}. ".format(pdb_id, chain, resid))
-                        if resid_index - 1 in reverse_structure_seq_map:
-                            index = reverse_structure_seq_map[resid_index - 1]
-                            print("Using the left-side fix")
-                        elif resid_index + 1 in reverse_structure_seq_map:
-                            index = reverse_structure_seq_map[resid_index + 1] - 2
-                            print("Using the right-side fix")
+        if filtered.shape[0] == 0:
+            print("No mapping found for PDB {} and chain {}. Skip.".format(pdb_id, chain))
+            continue
+        row = filtered.iloc[0]
+        resid = int(g.resid[0][1:])
+            
+        atom_df = process_pdb(os.path.join(args.pdb_dir, pdb_id+'.pdb'), chain, False)
+        pdb_sequence = []
+        count = 0
+        current_resid = None
+        resid_to_index = {}
+        for i in range(len(atom_df)):
+            if atom_df.iloc[i]['residue'] != current_resid and atom_df.iloc[i]['chain'] == chain:
+                pdb_sequence.append(atom_info.aa_to_letter(atom_df.iloc[i]['resname']))
+                # print(pdb_sequence)
+                current_resid = atom_df.iloc[i]['residue']
+                resid_to_index[current_resid] = count + 1 # 1-indexed
+                count += 1
+        pdb_sequence = ''.join(pdb_sequence)
 
-                    else:
-                        index = reverse_structure_seq_map[resid_index] - 1
-                    
-                    embeddings = sequence_embedding[index]
-                    current_resid = resid
-                    current_chain = chain
-                else:
-                    # print(row['SP_PRIMARY'])
-                    if not os.path.exists(f"fasta_cache/{row['SP_PRIMARY']}.fasta"):
-                        currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
-                        # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
-                        response = r.post(currentUrl)
-                        cData=''.join(response.text)
+        if pdb_id == current_pdb and current_chain == chain:
+            resid_index = resid_to_index[resid]
+            if resid_index not in reverse_structure_seq_map:
+                print("A mismatch is detected at PDB {} and chain {} and resid {}. ".format(pdb_id, chain, resid))
+                if resid_index - 1 in reverse_structure_seq_map:
+                    index = reverse_structure_seq_map[resid_index - 1]
+                    print("Using the left-side fix")
+                elif resid_index + 1 in reverse_structure_seq_map:
+                    index = reverse_structure_seq_map[resid_index + 1] - 2
+                    print("Using the right-side fix")
 
-                        Seq=StringIO(cData)
-                        pSeq=SeqIO.parse(Seq, 'fasta')
-                        pSeq = list(pSeq)
-                        pSeq = str(pSeq[0].seq)
-                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "w") as f:
-                            f.write(pSeq)
-                    else:
-                        with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "r") as f:
-                            pSeq = f.read()
-                    try:
-                        structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
-                    except StopIteration:
-                        # for some reasons we fail here
-                        print("Warning: failed to generate structure to sequence map for PDB {} and chain {}.".format(pdb_id, chain))
-                        pSeq = pdb_sequence
-                        structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
-                    reverse_structure_seq_map = {v: k for k, v in structure_seq_map.items()}
-                    d = [
-                        ("protein1", pSeq),
-                    ]
-                    if not is_lora_esm:
-                        batch_labels, batch_strs, batch_tokens = batch_converter(d)
-                        batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
-                        with torch.no_grad():
-                            batch_tokens = batch_tokens.cuda()
-                            results = esm_model(batch_tokens, repr_layers=[12], return_contacts=False)
-                        token_representations = results["representations"][12][:,1:-1]
-                    else:
-                        inputs = tokenizer(pSeq, return_tensors="pt", padding="longest", truncation=True, max_length=2048)
-                        inputs = {k: v.to('cuda') for k, v in inputs.items()}
-                        with torch.no_grad():
-                            outputs = esm_model(**inputs)
-                        token_representations = outputs
-                    if 'MoCo' in args.model:
-                        sequence_embedding = model.encoder_q(token_representations)[0]
-                    elif args.model == 'SimSiam':
-                        # print(token_representations.shape)
-                        sequence_embedding = model.projector(token_representations.squeeze(0))
-                    elif args.model == 'Triplet':
-                        sequence_embedding = model(token_representations)[0]
-                    resid_index = resid_to_index[resid]
-                    if resid_index not in reverse_structure_seq_map:
-                        print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
-                        current_resid = resid
-                        current_chain = chain
-                        continue
-                    else:
-                        index = reverse_structure_seq_map[resid_index] - 1
-                    if index >= len(sequence_embedding):
-                        print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
-                        current_resid = resid
-                        current_chain = chain
-                        continue
-                    embeddings = sequence_embedding[index]
-                    current_pdb = pdb_id
-                    current_chain = chain
-        # embeddings, _ = model.online_encoder(g, return_projection=False)
+            else:
+                index = reverse_structure_seq_map[resid_index] - 1
+            if index >= 1024:
+                continue
+            embeddings = sequence_embedding[index]
+            current_resid = resid
+            current_chain = chain
+        else:
+            # print(row['SP_PRIMARY'])
+            if not os.path.exists(f"fasta_cache/{row['SP_PRIMARY']}.fasta"):
+                currentUrl=baseUrl + row['SP_PRIMARY'] + ".fasta"
+                # currentUrl=baseUrl + pdb_id.split("_")[1] + ".fasta"
+                response = r.post(currentUrl)
+                cData=''.join(response.text)
+
+                Seq=StringIO(cData)
+                pSeq=SeqIO.parse(Seq, 'fasta')
+                pSeq = list(pSeq)
+                pSeq = str(pSeq[0].seq)
+                with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "w") as f:
+                    f.write(pSeq)
+            else:
+                with open(f"fasta_cache/{row['SP_PRIMARY']}.fasta", "r") as f:
+                    pSeq = f.read()
+            try:
+                structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
+            except StopIteration:
+                # for some reasons we fail here
+                print("Warning: failed to generate structure to sequence map for PDB {} and chain {}.".format(pdb_id, chain))
+                pSeq = pdb_sequence
+                structure_seq_map = generate_struct_to_seq_map(pdb_sequence, pSeq, range(1, len(pSeq) + 1), range(1, len(pSeq) + 1))
+            reverse_structure_seq_map = {v: k for k, v in structure_seq_map.items()}
+            d = [
+                ("protein1", pSeq),
+            ]
+            if not is_lora_esm:
+                batch_labels, batch_strs, batch_tokens = batch_converter(d)
+                batch_lens = (batch_tokens != alphabet.padding_idx).sum(1)    
+                with torch.no_grad():
+                    batch_tokens = batch_tokens.cuda()
+                    results = esm_model(batch_tokens[:, :1024], repr_layers=[12], return_contacts=False)
+                token_representations = results["representations"][12][:,1:-1]
+            else:
+                inputs = tokenizer(pSeq, return_tensors="pt", padding="longest", truncation=True, max_length=2048)
+                inputs = {k: v.to('cuda') for k, v in inputs.items()}
+                with torch.no_grad():
+                    outputs = esm_model(**inputs)
+                token_representations = outputs
+            if 'MoCo' in args.model:
+                sequence_embedding = model.encoder_q(token_representations)[0]
+            elif args.model == 'SimSiam':
+                # print(token_representations.shape)
+                sequence_embedding = model.projector(token_representations.squeeze(0))
+            elif args.model == 'Triplet':
+                sequence_embedding = model(token_representations)[0]
+            resid_index = resid_to_index[resid]
+            if resid_index not in reverse_structure_seq_map:
+                print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
+                current_resid = resid
+                current_chain = chain
+                continue
+            else:
+                index = reverse_structure_seq_map[resid_index] - 1
+            if index >= len(sequence_embedding):
+                print("A mismatch is detected at PDB {} and chain {} and resid {}. Skip this residue.".format(pdb_id, chain, resid))
+                current_resid = resid
+                current_chain = chain
+                continue
+            embeddings = sequence_embedding[index]
+            current_pdb = pdb_id
+            current_chain = chain
         all_emb.append(embeddings.squeeze().cpu().numpy())
         all_pdb.append(pdb[0])
         all_sites.append(desc[0])

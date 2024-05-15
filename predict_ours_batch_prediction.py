@@ -16,7 +16,7 @@ from io import StringIO
 from utils import generate_struct_to_seq_map
 import os
 from transformers import AutoTokenizer, AutoModel
-from modeling_esm import ESM_PLM
+# from modeling_esm import ESM_PLM
 global esm_model, batch_converter, is_lora_esm, tokenizer
 torch.backends.cudnn.benchmark = False
 # deteministic
@@ -248,7 +248,8 @@ if __name__=="__main__":
     parser.add_argument('--queue_size', type=int, default=1024)
     parser.add_argument('--prefix', type=str, default=None)
     parser.add_argument('--esm_checkpoint', type=str, default=None)
-    parser.add_argument('--esm_model', type=str, default="facebook/esm2_t12_35M_UR50D")
+    parser.add_argument('--esm_model', type=str, default="esm2_t12_35M_UR50D")
+    parser.add_argument('--esm_model_dim', type=int, default=480)
     parser.add_argument('--pdb_dir', type=str, default="")
     parser.add_argument('--output_dir', type=str, default=None)
     parser.add_argument('--hidden_dim', type=int, default=512)
@@ -257,7 +258,7 @@ if __name__=="__main__":
     
     
     if args.esm_checkpoint is None:
-        esm_model, alphabet = pretrained.load_model_and_alphabet('esm2_t12_35M_UR50D')
+        esm_model, alphabet = pretrained.load_model_and_alphabet(args.esm_model)
         esm_model = esm_model.to('cuda')
         batch_converter = alphabet.get_batch_converter()
         esm_model.eval()
@@ -280,14 +281,14 @@ if __name__=="__main__":
     # from CLEAN.simsiam import SimSiam
 
     if args.model == 'MoCo':
-        model = MoCo(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+        model = MoCo(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim, queue_size=args.queue_size).cuda()
     elif args.model == 'SimSiam':
-        # model = SimSiam(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        # model = SimSiam(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim).cuda()
         pass
     elif args.model == 'MoCo_positive_only':
-        model = MoCo_positive_only(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480, queue_size=args.queue_size).cuda()
+        model = MoCo_positive_only(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim, queue_size=args.queue_size).cuda()
     elif args.model == 'Triplet':
-        model = LayerNormNet(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=480).cuda()
+        model = LayerNormNet(args.hidden_dim, args.out_dim, torch.device('cuda'), torch.float, esm_model_dim=args.esm_model_dim).cuda()
     try:
         model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
     except:
